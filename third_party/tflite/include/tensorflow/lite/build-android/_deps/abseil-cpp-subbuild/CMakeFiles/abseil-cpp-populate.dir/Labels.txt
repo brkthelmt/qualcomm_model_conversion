@@ -1,0 +1,14 @@
+# Target labels
+ abseil-cpp-populate
+# Source files and their labels
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/abseil-cpp-subbuild/CMakeFiles/abseil-cpp-populate
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/abseil-cpp-subbuild/CMakeFiles/abseil-cpp-populate.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/abseil-cpp-subbuild/CMakeFiles/abseil-cpp-populate-complete.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-build.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-configure.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-download.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-install.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-mkdir.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-patch.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-test.rule
+/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/abseil-cpp-populate-stamp/abseil-cpp-populate-update.rule

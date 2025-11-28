@@ -1,0 +1,23 @@
+--------- beginning of main
+11-27 17:47:44.412  9101  9109 W com.tencent.mm: Reducing the number of considered missed Gc histogram windows from 208 to 100
+11-27 17:47:44.416  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.417  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.417  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.418  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.418  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.418  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.418  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.419  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.419  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.419  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.419  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.420  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.420  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.420  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.421  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.421  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.421  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.421  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:44.422  9101  9111 W System  : A resource failed to call close. 
+11-27 17:47:47.362 21598 21598 I tflite  : Initialized TensorFlow Lite runtime.
+11-27 17:47:47.363 21598 21598 W libc    : Access denied finding property "ro.hardware.chipname"

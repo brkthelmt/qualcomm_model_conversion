@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/tensorflow-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

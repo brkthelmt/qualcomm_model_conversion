@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/eigen-subbuild/CMakeFiles/eigen-populate"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/eigen-subbuild/CMakeFiles/eigen-populate.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/_deps/eigen-subbuild/CMakeFiles/eigen-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-build.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-download.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-install.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-test.rule"
+		},
+		{
+			"file" : "/Users/fzoneandonly/Desktop/Code/tensorflow/tensorflow/lite/build-android/src/eigen-populate-stamp/eigen-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"eigen-populate"
+		],
+		"name" : "eigen-populate"
+	}
+}
