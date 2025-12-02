@@ -7,6 +7,7 @@
 #include <iostream>
 #include <filesystem>
 #include "bmp_io.h"
+#include <set>
 
 static void write_shape(const std::string& path, const std::vector<int64_t>& shape){
   std::ofstream os(path);
@@ -36,8 +37,8 @@ static ONNXTensorElementDataType get_input_type(const Ort::Session& session, siz
 
 static bool is_nhwc_from_shape(const std::vector<int64_t>& shape){
   if(shape.size()==4){
-    // Heuristic: NHWC if last dim == 3 (RGB)
-    return shape[3]==3;
+    if(shape[3]==3) return true;
+    if(shape[1]==3) return false;
   }
   return true;
 }
@@ -77,8 +78,16 @@ static void enable_provider(Ort::SessionOptions& so, const std::string& provider
     } catch(...) {
       // ignore
     }
+  } else if(provider=="qnn"){
+    try {
+      std::unordered_map<std::string,std::string> opts;
+      opts["backend_path"] = "libQnnHtp.so";
+      opts["htp_performance_mode"] = "burst";
+      opts["qnn_context_priority"] = "high";
+      so.AppendExecutionProvider("QNN", opts);
+    } catch(...) {
+    }
   } else {
-    // other providers not enabled in this build
   }
 }
 
@@ -87,12 +96,35 @@ int RunONNX(const std::string& model_path,
             const std::string& out_dir,
             const std::string& provider,
             int threads,
-            const std::string& qnn_context_path){
-  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "yolo_runner_onnx");
+            const std::string& qnn_context_path,
+            const std::string& qnn_vtcm_mb){
+  Ort::Env env(ORT_LOGGING_LEVEL_VERBOSE, "yolo_runner_onnx");
   Ort::SessionOptions so;
   if(threads>0) so.SetIntraOpNumThreads(threads);
-  so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-  enable_provider(so, provider);
+  so.SetLogSeverityLevel(0);
+  so.EnableProfiling("ort_profile");
+  if(provider=="qnn"){
+    so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+  } else {
+    so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+    so.SetInterOpNumThreads(1);
+    so.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+    so.DisableMemPattern();
+    so.DisableCpuMemArena();
+  }
+  if(provider=="qnn"){
+    try {
+      std::unordered_map<std::string,std::string> opts;
+      opts["backend_path"] = "libQnnHtp.so";
+      opts["htp_performance_mode"] = "burst";
+      opts["qnn_context_priority"] = "high";
+      if(!qnn_vtcm_mb.empty()) opts["vtcm_mb"] = qnn_vtcm_mb;
+      so.AppendExecutionProvider("QNN", opts);
+    } catch(...) {
+    }
+  } else {
+    enable_provider(so, provider);
+  }
   if(provider=="qnn"){
     if(!qnn_context_path.empty()){
       std::ifstream f(qnn_context_path, std::ios::binary);
@@ -109,6 +141,12 @@ int RunONNX(const std::string& model_path,
   }
 
   Ort::Session session(env, model_path.c_str(), so);
+  {
+    auto provs = Ort::GetAvailableProviders();
+    std::cout << "available_providers=";
+    for(size_t i=0;i<provs.size();++i){ std::cout << provs[i]; if(i+1<provs.size()) std::cout << ","; }
+    std::cout << std::endl;
+  }
   ImageRGB img = LoadBMP24(image_path);
 
   size_t n_inputs = session.GetInputCount();
@@ -121,14 +159,12 @@ int RunONNX(const std::string& model_path,
   if(shape.size()==4){
     if(nhwc){ h = (int)shape[1]; w = (int)shape[2]; }
     else { h = (int)shape[2]; w = (int)shape[3]; }
-  } else {
-    // fallback guess
-    h = img.height; w = img.width;
   }
+  if(h <= 0 || w <= 0){ h = img.height; w = img.width; }
 
   std::vector<int64_t> input_dims;
-  if(nhwc){ input_dims = {1, h, w, 3}; }
-  else { input_dims = {1, 3, h, w}; }
+  if(nhwc){ input_dims = {1, (int64_t)h, (int64_t)w, 3}; }
+  else { input_dims = {1, 3, (int64_t)h, (int64_t)w}; }
 
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
   Ort::Value input_tensor{nullptr};
@@ -184,6 +220,47 @@ int RunONNX(const std::string& model_path,
   auto output = session.Run(Ort::RunOptions{nullptr}, input_names.data(), &input_tensor, 1, output_names.data(), output_names.size());
 
   std::filesystem::create_directories(out_dir);
+  {
+    Ort::AllocatorWithDefaultOptions alloc;
+    auto prof_path_ptr = session.EndProfilingAllocated(alloc);
+    const char* prof_path = prof_path_ptr.get();
+    if(prof_path && *prof_path){
+      std::cout << "profile_path=" << prof_path << std::endl;
+      std::ifstream pf(prof_path);
+      if(pf){
+        std::string s((std::istreambuf_iterator<char>(pf)), std::istreambuf_iterator<char>());
+        std::set<std::pair<std::string,std::string>> printed;
+        size_t pos = 0;
+        while(true){
+          size_t keyp = s.find("\"provider\"", pos);
+          if(keyp == std::string::npos) break;
+          size_t colon = s.find(':', keyp);
+          size_t p = s.find('"', colon);
+          size_t q = s.find('"', p+1);
+          std::string provider = (p!=std::string::npos && q!=std::string::npos) ? s.substr(p+1, q-(p+1)) : std::string();
+          size_t start = (keyp>2000? keyp-2000 : 0);
+          size_t op_key = s.rfind("\"op_name\"", keyp);
+          size_t op_pos = op_key;
+          if(op_pos == std::string::npos || op_pos < start){ op_pos = s.rfind("\"node_name\"", keyp); }
+          std::string op;
+          if(op_pos != std::string::npos){
+            size_t op_colon = s.find(':', op_pos);
+            size_t a = s.find('"', op_colon);
+            size_t b = s.find('"', a+1);
+            if(a!=std::string::npos && b!=std::string::npos) op = s.substr(a+1, b-(a+1));
+          }
+          if(!provider.empty() && !op.empty()){
+            auto key = std::make_pair(op, provider);
+            if(!printed.count(key)){
+              printed.insert(key);
+              std::cout << "op_provider " << op << " " << provider << std::endl;
+            }
+          }
+          pos = q == std::string::npos ? keyp+1 : q+1;
+        }
+      }
+    }
+  }
   // Dump all outputs
   for(size_t i=0;i<output.size(); ++i){
     auto& v = output[i];
@@ -202,10 +279,6 @@ int RunONNX(const std::string& model_path,
     } else if(elem_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8){
       const int8_t* p = v.GetTensorData<int8_t>();
       write_bin(base + ".bin", p, elem_count * sizeof(int8_t));
-    } else {
-      // fallback as float via copy
-      const float* p = v.GetTensorData<float>();
-      write_bin(base + ".bin", p, elem_count * sizeof(float));
     }
   }
 

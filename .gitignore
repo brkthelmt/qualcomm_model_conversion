@@ -1,0 +1,36 @@
+# Build outputs
+build/
+
+# Device-run outputs pulled back
+output_pull/
+
+# Temporary files
+.tmp/
+.tmp_input.bmp
+
+# Runtime profiles and logs
+ort_profile_*.json
+device_logs.txt
+
+# Generated artifacts
+output/
+*.bin
+*.shape.txt
+*.quant.txt
+annotated.bmp
+
+# QAIRT/QNN runtime libs and vendor drops
+qa_libs/
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Ensure third_party is tracked fully (override above ignores)
+!third_party/**
+*.dlc
+*.onnx

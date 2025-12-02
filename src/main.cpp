@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
     std::string out_dir = getArg(argc, argv, "--output", "output");
     std::string delegate = getArg(argc, argv, "--delegate", "cpu");
     std::string qnn_context = getArg(argc, argv, "--qnn-context", "");
+    std::string qnn_vtcm_mb = getArg(argc, argv, "--vtcm-mb", "0");
     std::string labels_path = getArg(argc, argv, "--labels", "");
     std::string boxes_path = getArg(argc, argv, "--boxes", "");
     std::string overlay_only = getArg(argc, argv, "--overlay-only", "false");
@@ -58,7 +59,7 @@ int main(int argc, char** argv) {
     // If ONNX model, run via ONNX Runtime
     #ifdef HAVE_ORT
     if(model_path.size()>=5 && model_path.substr(model_path.size()-5)==".onnx"){
-      int rc = RunONNX(model_path, image_path, out_dir, delegate, threads, qnn_context);
+      int rc = RunONNX(model_path, image_path, out_dir, delegate, threads, qnn_context, qnn_vtcm_mb);
       if(rc!=0) throw std::runtime_error("onnx_run");
       std::cout << "done" << std::endl;
       return 0;

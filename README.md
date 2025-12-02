@@ -20,6 +20,17 @@
     - 可选（QNN EP）：`libonnxruntime_providers_qnn.so`
   - 若使用 QNN（Qualcomm HTP/NPU），设备需具备 QAIRT/QNN 运行库（例如 `libQnnHtp.so` 及相关 skel 等）；请将其置于设备可加载目录或通过脚本推送到运行目录并设置 `LD_LIBRARY_PATH`
 
+#### 运行选项（ONNX 路径）
+- `--delegate nnapi`：启用 NNAPI EP 加速，自动将支持的算子下发到 NPU，其他回退 CPU。
+- `--delegate qnn`：启用 QNN EP 加速，需要同时提供 `libonnxruntime_providers_qnn.so` 和设备端 QAIRT/QNN `.so`（如 `libQnnHtp.so`）。
+- `--vtcm-mb <N>`：当 `--delegate qnn` 时指定 VTCM 大小（MB），典型值 `16/32/64`，用于缓解图准备期间的 scratchpad 压力。
+- 程序会打印 `available_providers=...` 以展示当前会话可用 EP 列表。
+
+#### Profiling 与算子 Provider 映射
+- 已在代码中启用 ORT profiling，运行后会打印 `profile_path=ort_profile_YYYY-MM-DD_HH-MM-SS.json` 并将文件保存在设备运行目录。
+- Profiling 文件包含每个节点的执行信息，其中 `provider` 字段指示算子归属（如 `NnapiExecutionProvider` / `CPUExecutionProvider`）。
+- 我们在程序运行后解析并打印 `op_provider <op> <provider>`，便于快速确认算子加速情况（也可将 profiling 拉回主机自行解析）。
+
 ## 构建
 - 一键交叉编译：
   - `bash android_deploy/build_android.sh`
@@ -28,6 +39,7 @@
 ## 设备运行
 - 推送并运行（示例采用 `android_deploy/models` 中的模型）：
   - NNAPI（ONNX）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate nnapi`
+  - QNN（ONNX QNN EP）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate qnn --qnn-lib-dir-host "<QNN_SDK_ROOT>/lib/aarch64-android"`（如需 VTCM：在直连运行命令中加 `--vtcm-mb 32`）
   - QNN（原生 C API + w8a8 上下文）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate qnn --qnn-context-host-path android_deploy/models/yolov7_w8a8.bin --qnn-lib-dir-host "<QNN_SDK_ROOT>/lib/aarch64-android"`
     - 需确保设备运行目录包含 QAIRT/QNN 库（如 `libQnnHtp.so`），或通过 `--qnn-lib-dir-host` 推送
 - 说明：
@@ -42,9 +54,9 @@
   - `adb logcat -d | grep -i -E 'nnapi|neuralnetworks|ANEURALNETWORKS'`
 
 ### QNN（Qualcomm NPU/HTP）
-- 通过 `--delegate qnn` 启用 ONNX Runtime 的 QNN EP（若已打包 provider 与 QAIRT 库）
-- 默认 provider 选项：`backend_path=libQnnHtp.so`、`htp_performance_mode=burst`、`qnn_context_priority=high`、`enable_htp_shared_memory_allocator=1`
-- 设备需为骁龙平台（例如 Snapdragon 865/SM8250），并安装匹配版本的 QAIRT/QNN 运行库
+- 通过 `--delegate qnn` 启用 ONNX Runtime 的 QNN EP（需 `libonnxruntime_providers_qnn.so` 与 QAIRT 库）。
+- 默认 provider 选项：`backend_path=libQnnHtp.so`、`htp_performance_mode=burst`、`qnn_context_priority=high`。可选：`vtcm_mb=<MB>`、`htp_graph_finalization_optimization_mode=1`（图准备更快，代价是略低优化）。
+- 设备需为骁龙平台（如 Snapdragon 865/SM8250），并安装匹配版本的 QAIRT/QNN 运行库。
 
 ## 原生 QNN C API（推荐在片上加载 w8a8 context）
 - 运行入口：当传入 `--delegate qnn` 且提供 `--qnn-context` 时，程序走原生 QNN C API 路径（`qnn_runner.cpp`）。
@@ -65,6 +77,7 @@
 - `--delegate {cpu|nnapi|qnn}`：选择推理/加速后端
 - `--qnn-context <path>`：原生 QNN 路径下加载的 context 二进制（设备端文件名为 `qnn_context.bin`）
 - `--qnn-lib-dir-host <dir>`：本机 QNN `.so` 库所在目录，推送到设备运行目录并设置 `LD_LIBRARY_PATH`
+- `--vtcm-mb <MB>`：QNN EP 使用的 VTCM 大小（MB）
 
 ## 常用命令
 - 指定 NDK 与 API：
@@ -76,6 +89,11 @@
   - `adb push /path/to/image.bmp /data/local/tmp/yolo_run/image.bmp`
   - `adb shell 'cd /data/local/tmp/yolo_run && chmod +x yolo_runner && LD_LIBRARY_PATH=/data/local/tmp/yolo_run ./yolo_runner --model model.tflite --image image.bmp --output output --delegate nnapi'`
   - `adb pull /data/local/tmp/yolo_run/output android_deploy/output_pull`
+
+## 清理与忽略
+- 构建与运行产物：
+  - 执行清理前已删除：`android_deploy/build/android/`、`android_deploy/output_pull/`、`android_deploy/.tmp/`、`android_deploy/.tmp_input.bmp`
+  - `.gitignore` 已添加忽略：`build/`、`output_pull/`、`.tmp/`、`.tmp_input.bmp`、`ort_profile_*.json`、`device_logs.txt`、`output/`、`*.bin`、`*.shape.txt`、`*.quant.txt`、`annotated.bmp`
 
 ## 备注
 - 当前可执行支持 C API（集成到二进制）与 C++ Interpreter 两种路径；运行脚本会自动推送所需 `.so` 并设置 `LD_LIBRARY_PATH`
