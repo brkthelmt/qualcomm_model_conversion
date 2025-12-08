@@ -3,81 +3,61 @@
 ## 环境准备
 - 安装并设置 `ANDROID_NDK` 或使用 `--ndk` 参数指向 NDK 路径
 - 确保 `adb` 可用，设备已连接且允许调试
-- 将 TFLite 头文件与库放置在：
-  - 头文件：`android_deploy/third_party/tflite/include/tensorflow/lite/...`
-  - 库文件：`android_deploy/third_party/tflite/lib/arm64-v8a/`
-    - 必需：`libtensorflowlite.so`
-    - 可选（C API）：`libtensorflowlite_c.so`
-    - 可选（NNAPI delegate 动态库）：`libtensorflowlite_nnapi_delegate.so`
+- 第三方依赖通过脚本自动拉取，无需手工放置：
+  - ONNX Runtime：AAR（MavenCentral）与头文件（GitHub Release）；额外拉取 `nnapi_provider_factory.h`
+  - TFLite：AAR（MavenCentral）提取 `libtensorflowlite_jni.so` 与 C API 头；不需要 `libtensorflowlite.so`
+  - FlatBuffers：优先使用本机系统头（如 `/opt/homebrew/include/flatbuffers`），否则自动从 GitHub 拉取头文件
 
-### ONNX Runtime 支持（NPU：NNAPI/QNN）
-- 将 ONNX Runtime 头文件与库放置在：
-  - 头文件：`android_deploy/third_party/onnxruntime/include/`
-  - 库文件：`android_deploy/third_party/onnxruntime/lib/arm64-v8a/`
-    - 必需：`libonnxruntime.so`
-    - 建议：`libonnxruntime_providers_shared.so`
-    - 可选（NNAPI EP）：`libonnxruntime_providers_nnapi.so`
-    - 可选（QNN EP）：`libonnxruntime_providers_qnn.so`
-  - 若使用 QNN（Qualcomm HTP/NPU），设备需具备 QAIRT/QNN 运行库（例如 `libQnnHtp.so` 及相关 skel 等）；请将其置于设备可加载目录或通过脚本推送到运行目录并设置 `LD_LIBRARY_PATH`
+### ONNX Runtime 支持（NPU：NNAPI）
+- 自动拉取后目录结构：
+  - 头文件：`android_deploy/third_party/onnxruntime/include/`（含 `onnxruntime_*.h` 与 `nnapi_provider_factory.h`）
+  - 库文件：`android_deploy/third_party/onnxruntime/lib/arm64-v8a/`（AAR 提供 `libonnxruntime.so`）
+  - 说明：部分 AAR 不再包含 `libonnxruntime_providers_nnapi.so` 与 `libonnxruntime_providers_shared.so`，若存在将自动推送；否则按工厂函数注册即可
+    
 
 #### 运行选项（ONNX 路径）
-- `--delegate nnapi`：启用 NNAPI EP 加速，自动将支持的算子下发到 NPU，其他回退 CPU。
-- `--delegate qnn`：启用 QNN EP 加速，需要同时提供 `libonnxruntime_providers_qnn.so` 和设备端 QAIRT/QNN `.so`（如 `libQnnHtp.so`）。
-- `--vtcm-mb <N>`：当 `--delegate qnn` 时指定 VTCM 大小（MB），典型值 `16/32/64`，用于缓解图准备期间的 scratchpad 压力。
-- 程序会打印 `available_providers=...` 以展示当前会话可用 EP 列表。
+- `--delegate nnapi`：启用 NNAPI EP，加速可支持算子，其余自动回退 CPU。
+- 工厂函数注册：项目使用 `OrtSessionOptionsAppendExecutionProvider_Nnapi(so, 0)` 注册 NNAPI，稳定形成混合分区（NNAPI+CPU）。
+- 图优化：默认启用 `ORT_ENABLE_EXTENDED`，以获得更好的分区与性能。若需对齐原始图做分析，可临时切换 `ORT_DISABLE_ALL`。
 
 #### Profiling 与算子 Provider 映射
-- 已在代码中启用 ORT profiling，运行后会打印 `profile_path=ort_profile_YYYY-MM-DD_HH-MM-SS.json` 并将文件保存在设备运行目录。
-- Profiling 文件包含每个节点的执行信息，其中 `provider` 字段指示算子归属（如 `NnapiExecutionProvider` / `CPUExecutionProvider`）。
-- 我们在程序运行后解析并打印 `op_provider <op> <provider>`，便于快速确认算子加速情况（也可将 profiling 拉回主机自行解析）。
+- 已启用 ORT profiling，运行后会打印 `profile_path=ort_profile_*.json` 并回拉到本机 `output_pull/`。
+- Profiling 文件中 `provider` 字段指示算子归属；默认优化开启时会产生聚合节点（如 `Nnapi_...`），与原始图不一一对应属正常现象。
+- 程序打印 `op_provider <op> <provider>` 以快速确认分区命中；也可直接解析 profiling JSON 获取 provider 统计。
 
 ## 构建
-- 一键交叉编译：
-  - `bash android_deploy/build_android.sh`
-  - 自动检测设备 API（推荐 29+），生成可执行：`android_deploy/build/android/arm64-v8a/yolo_runner`
+- 一键交叉编译：`bash android_deploy/build_android.sh`
+- 自动拉取 third_party 并生成可执行：`android_deploy/build/android/arm64-v8a/yolo_runner`
 
 ## 设备运行
 - 推送并运行（示例采用 `android_deploy/models` 中的模型）：
-  - NNAPI（ONNX）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate nnapi`
-  - QNN（ONNX QNN EP）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate qnn --qnn-lib-dir-host "<QNN_SDK_ROOT>/lib/aarch64-android"`（如需 VTCM：在直连运行命令中加 `--vtcm-mb 32`）
-  - QNN（原生 C API + w8a8 上下文）：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/model.onnx --image-host-path /path/to/image.jpg --delegate qnn --qnn-context-host-path android_deploy/models/yolov7_w8a8.bin --qnn-lib-dir-host "<QNN_SDK_ROOT>/lib/aarch64-android"`
-    - 需确保设备运行目录包含 QAIRT/QNN 库（如 `libQnnHtp.so`），或通过 `--qnn-lib-dir-host` 推送
-- 说明：
-  - 非 BMP 图片将自动用 `sips` 转为 24-bit BMP
-  - 结果回拉到 `android_deploy/output_pull`（包含 `output_*.bin` 与 `output_*.shape.txt`）
+  - ONNX + NNAPI：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/yolov8s_ir10.onnx --image-host-path android_deploy/sample.jpg --delegate nnapi`
+  - TFLite + NNAPI：`./android_deploy/run_on_device.sh --model-host-path android_deploy/models/yolov7_w8a8.tflite --image-host-path android_deploy/sample.jpg --delegate nnapi`
+- 说明：非 BMP 图片将自动转为 24-bit BMP；结果回拉到 `android_deploy/output_pull`（含 `output/` 与 `ort_profile_*.json`）
 
 ## NNAPI/NPU
-- 通过 `--delegate nnapi` 启用 NNAPI；设备支持的算子将下发到 NPU，不支持的自动回退 CPU
-- 如需设备日志验证：
-  - `adb logcat -c`
-  - 运行推理
-  - `adb logcat -d | grep -i -E 'nnapi|neuralnetworks|ANEURALNETWORKS'`
+- 通过 `--delegate nnapi` 启用；设备支持的算子下发 NPU，其余回退 CPU。
+- 设备日志验证：`adb logcat -d | grep -i -E 'onnxruntime|NNAPI|Nnapi|tflite'`
 
-### QNN（Qualcomm NPU/HTP）
-- 通过 `--delegate qnn` 启用 ONNX Runtime 的 QNN EP（需 `libonnxruntime_providers_qnn.so` 与 QAIRT 库）。
-- 默认 provider 选项：`backend_path=libQnnHtp.so`、`htp_performance_mode=burst`、`qnn_context_priority=high`。可选：`vtcm_mb=<MB>`、`htp_graph_finalization_optimization_mode=1`（图准备更快，代价是略低优化）。
-- 设备需为骁龙平台（如 Snapdragon 865/SM8250），并安装匹配版本的 QAIRT/QNN 运行库。
+ 
 
-## 原生 QNN C API（推荐在片上加载 w8a8 context）
-- 运行入口：当传入 `--delegate qnn` 且提供 `--qnn-context` 时，程序走原生 QNN C API 路径（`qnn_runner.cpp`）。
-- SDK 配置：
-  - 设置环境变量 `QNN_SDK_ROOT` 指向 QAIRT/QNN SDK 根目录（包含 `include/QNN/*.h` 与 `lib/aarch64-android/*.so` 或 `lib/arm64-v8a/*.so`）
-  - 工程会在构建时条件链接 `libQnnHtp.so` 与 `libQnnSystem.so`
-- 设备推送：
-  - `./android_deploy/run_on_device.sh --model-host-path <your.onnx> --image-host-path <image> --delegate qnn --qnn-context-host-path ./android_deploy/yolov7_w8a8.bin --qnn-lib-dir-host "<QNN_SDK_ROOT>/lib/aarch64-android"`
-  - 脚本会推送 `qnn_context.bin` 与 `libQnn*.so` 到 `/data/local/tmp/yolo_run` 并设置 `LD_LIBRARY_PATH`
+ 
 
 ## 模型归档
-- 将模型与上下文文件统一放在 `android_deploy/models/` 目录，例如：
-  - `android_deploy/models/model.onnx`
-  - `android_deploy/models/yolov7_w8a8.bin`
-  - 按需放置 `labels.txt`
+- 模型统一放在 `android_deploy/models/`：仅保留 `.onnx` 与 `.tflite`；其他格式已清理。
+- 示例：`yolov8s_ir10.onnx`、`yolov8s.onnx`、`yolov7_w8a8.tflite`、`MobileNet-v3-Small_float.tflite`
 
 ## 参数摘要
-- `--delegate {cpu|nnapi|qnn}`：选择推理/加速后端
-- `--qnn-context <path>`：原生 QNN 路径下加载的 context 二进制（设备端文件名为 `qnn_context.bin`）
-- `--qnn-lib-dir-host <dir>`：本机 QNN `.so` 库所在目录，推送到设备运行目录并设置 `LD_LIBRARY_PATH`
-- `--vtcm-mb <MB>`：QNN EP 使用的 VTCM 大小（MB）
+- `--delegate {cpu|nnapi}`：选择推理/加速后端
+
+## 第三方依赖自动拉取
+- 构建脚本自动调用：`android_deploy/scripts/fetch_thirdparty.sh`
+- 下载源：
+  - ORT AAR：MavenCentral（稳定）
+  - ORT 头：GitHub Release（支持 `ghfast.top` 与 `ghproxy` 代理回退）
+  - NNAPI 工厂头：GitHub raw（支持代理回退）
+  - TFLite AAR：MavenCentral
+  - FlatBuffers 头：优先使用系统头，否则从 GitHub 拉取
 
 ## 常用命令
 - 指定 NDK 与 API：
@@ -91,9 +71,8 @@
   - `adb pull /data/local/tmp/yolo_run/output android_deploy/output_pull`
 
 ## 清理与忽略
-- 构建与运行产物：
-  - 执行清理前已删除：`android_deploy/build/android/`、`android_deploy/output_pull/`、`android_deploy/.tmp/`、`android_deploy/.tmp_input.bmp`
-  - `.gitignore` 已添加忽略：`build/`、`output_pull/`、`.tmp/`、`.tmp_input.bmp`、`ort_profile_*.json`、`device_logs.txt`、`output/`、`*.bin`、`*.shape.txt`、`*.quant.txt`、`annotated.bmp`
+- `.gitignore` 已包含：`build/`、`output_pull/`、`logs/`、`.tmp/`、`ort_profile_*.json`、`output/`、二进制输出与中间图像
+- 忽略自动拉取的库与临时头：`third_party/onnxruntime/lib/`、`third_party/tflite/lib/`、`third_party/tflite/include/headers/`、`/_tmp_hdr/`、`/_tmp_fb/`
 
 ## 备注
 - 当前可执行支持 C API（集成到二进制）与 C++ Interpreter 两种路径；运行脚本会自动推送所需 `.so` 并设置 `LD_LIBRARY_PATH`

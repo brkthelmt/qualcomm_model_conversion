@@ -70,75 +70,30 @@ static uint16_t float_to_half(float v){
   return h;
 }
 
+// 在 Android 设备上启用 NNAPI EP：当传入 `provider=="nnapi"` 时，向 ORT 会话选项追加 NNAPI Execution Provider
 static void enable_provider(Ort::SessionOptions& so, const std::string& provider){
   if(provider=="nnapi"){
     try {
-      uint32_t flags = 0; // NNAPI_FLAG_USE_NONE
+      uint32_t flags = 0;
       OrtSessionOptionsAppendExecutionProvider_Nnapi(so, flags);
     } catch(...) {
-      // ignore
     }
-  } else if(provider=="qnn"){
-    try {
-      std::unordered_map<std::string,std::string> opts;
-      opts["backend_path"] = "libQnnHtp.so";
-      opts["htp_performance_mode"] = "burst";
-      opts["qnn_context_priority"] = "high";
-      so.AppendExecutionProvider("QNN", opts);
-    } catch(...) {
-    }
-  } else {
   }
 }
 
+// 通过 ONNX Runtime 执行 .onnx 模型；当 provider=="nnapi" 时在 Android 上走 NNAPI EP，否则走 CPU
 int RunONNX(const std::string& model_path,
             const std::string& image_path,
             const std::string& out_dir,
             const std::string& provider,
-            int threads,
-            const std::string& qnn_context_path,
-            const std::string& qnn_vtcm_mb){
+            int threads){
   Ort::Env env(ORT_LOGGING_LEVEL_VERBOSE, "yolo_runner_onnx");
   Ort::SessionOptions so;
   if(threads>0) so.SetIntraOpNumThreads(threads);
   so.SetLogSeverityLevel(0);
   so.EnableProfiling("ort_profile");
-  if(provider=="qnn"){
-    so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-  } else {
-    so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
-    so.SetInterOpNumThreads(1);
-    so.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-    so.DisableMemPattern();
-    so.DisableCpuMemArena();
-  }
-  if(provider=="qnn"){
-    try {
-      std::unordered_map<std::string,std::string> opts;
-      opts["backend_path"] = "libQnnHtp.so";
-      opts["htp_performance_mode"] = "burst";
-      opts["qnn_context_priority"] = "high";
-      if(!qnn_vtcm_mb.empty()) opts["vtcm_mb"] = qnn_vtcm_mb;
-      so.AppendExecutionProvider("QNN", opts);
-    } catch(...) {
-    }
-  } else {
-    enable_provider(so, provider);
-  }
-  if(provider=="qnn"){
-    if(!qnn_context_path.empty()){
-      std::ifstream f(qnn_context_path, std::ios::binary);
-      if(f){
-        f.seekg(0,std::ios::end); size_t bytes = (size_t)f.tellg(); f.seekg(0,std::ios::beg);
-        std::vector<uint8_t> buf(bytes); f.read(reinterpret_cast<char*>(buf.data()), bytes);
-        std::cout << "qnn_context_binary loaded, bytes=" << bytes << std::endl;
-      } else {
-        std::cout << "qnn_context_binary not found: " << qnn_context_path << std::endl;
-      }
-    } else {
-      std::cout << "qnn_context_binary path is empty" << std::endl;
-    }
-  }
+  so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+  enable_provider(so, provider);
 
   Ort::Session session(env, model_path.c_str(), so);
   {
@@ -154,6 +109,7 @@ int RunONNX(const std::string& model_path,
   auto shape = get_input_shape(session, 0);
   auto in_type = get_input_type(session, 0);
   std::cout << "input_type=" << (int)in_type << std::endl;
+  std::cout << "input_shape="; for(size_t i=0;i<shape.size();++i){ std::cout << shape[i] << (i+1<shape.size()? "," : ""); } std::cout << std::endl;
   bool nhwc = is_nhwc_from_shape(shape);
   int h = 0, w = 0;
   if(shape.size()==4){
@@ -217,6 +173,7 @@ int RunONNX(const std::string& model_path,
     for(size_t i=0;i<n_outputs;++i){ output_name_ptrs.emplace_back(session.GetOutputNameAllocated(i, alloc)); }
     for(auto& p: output_name_ptrs){ output_names.push_back(p.get()); }
   }
+  // 执行推理，输出张量将用于落盘以便在设备侧/回拉后分析
   auto output = session.Run(Ort::RunOptions{nullptr}, input_names.data(), &input_tensor, 1, output_names.data(), output_names.size());
 
   std::filesystem::create_directories(out_dir);
@@ -261,7 +218,7 @@ int RunONNX(const std::string& model_path,
       }
     }
   }
-  // Dump all outputs
+  // 导出所有输出张量到 `out_dir`，含 shape 与二进制内容，便于 Android 设备侧验证
   for(size_t i=0;i<output.size(); ++i){
     auto& v = output[i];
     auto ti = v.GetTensorTypeAndShapeInfo();

@@ -5,14 +5,15 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#ifndef DISABLE_TFLITE
 #include <tensorflow/lite/c/c_api.h>
 #include <tensorflow/lite/core/c/c_api_experimental.h>
+#endif
 #include "bmp_io.h"
 #include "tensor_ops.h"
 #ifdef HAVE_ORT
 #include "onnx_runner.h"
 #endif
-#include "qnn_runner.h"
 
 static std::string getArg(int argc, char** argv, const std::string& key, const std::string& defv) {
   for(int i = 1; i < argc - 1; ++i) if(std::string(argv[i]) == key) return argv[i+1];
@@ -25,8 +26,6 @@ int main(int argc, char** argv) {
     std::string image_path = getArg(argc, argv, "--image", "image.bmp");
     std::string out_dir = getArg(argc, argv, "--output", "output");
     std::string delegate = getArg(argc, argv, "--delegate", "cpu");
-    std::string qnn_context = getArg(argc, argv, "--qnn-context", "");
-    std::string qnn_vtcm_mb = getArg(argc, argv, "--vtcm-mb", "0");
     std::string labels_path = getArg(argc, argv, "--labels", "");
     std::string boxes_path = getArg(argc, argv, "--boxes", "");
     std::string overlay_only = getArg(argc, argv, "--overlay-only", "false");
@@ -56,27 +55,28 @@ int main(int argc, char** argv) {
       std::cout << "done" << std::endl;
       return 0;
     }
-    // If ONNX model, run via ONNX Runtime
+    // ONNX 部署路径：若模型为 .onnx，使用 ONNX Runtime 执行
+    // - Android NNAPI: 通过传入 `--delegate nnapi` 触发在 RunONNX 中启用 NNAPI Execution Provider
+    // - CPU: 其它情况走 ORT 默认 CPU
     #ifdef HAVE_ORT
     if(model_path.size()>=5 && model_path.substr(model_path.size()-5)==".onnx"){
-      int rc = RunONNX(model_path, image_path, out_dir, delegate, threads, qnn_context, qnn_vtcm_mb);
+      int rc = RunONNX(model_path, image_path, out_dir, delegate, threads);
       if(rc!=0) throw std::runtime_error("onnx_run");
       std::cout << "done" << std::endl;
       return 0;
     }
     #endif
 
-    if(delegate == "qnn" && !qnn_context.empty()){
-      int rc = RunQNN(qnn_context, image_path, out_dir, threads);
-      if(rc!=0) throw std::runtime_error("qnn_run");
-      std::cout << "done" << std::endl;
-      return 0;
-    }
+    
 
+#ifndef DISABLE_TFLITE
     TfLiteModel* model = TfLiteModelCreateFromFile(model_path.c_str());
     if(!model) throw std::runtime_error("model");
     TfLiteInterpreterOptions* options = TfLiteInterpreterOptionsCreate();
     TfLiteInterpreterOptionsSetNumThreads(options, threads);
+    // TFLite 部署路径：使用 TFLite C API 执行 .tflite 模型
+    // - Android NNAPI: 传入 `--delegate nnapi` 时启用 NNAPI delegate，使算子在设备神经网络硬件上运行
+    // - CPU: 默认在 CPU 上执行
     if(delegate == "nnapi") {
       TfLiteInterpreterOptionsSetUseNNAPI(options, true);
     }
@@ -203,6 +203,9 @@ int main(int argc, char** argv) {
     TfLiteModelDelete(model);
     std::cout << "done" << std::endl;
     return 0;
+#else
+    throw std::runtime_error("tflite_disabled");
+#endif
   } catch(const std::exception& e) {
     std::cerr << e.what() << std::endl;
     return 1;

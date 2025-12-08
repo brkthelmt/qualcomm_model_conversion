@@ -27,6 +27,10 @@ if [ -z "${NDK_ROOT}" ]; then
   fi
 fi
 
+# 拉取 third_party 依赖（可由环境变量配置版本与下载源）
+chmod +x "${SCRIPT_DIR}/scripts/fetch_thirdparty.sh"
+"${SCRIPT_DIR}/scripts/fetch_thirdparty.sh" --abi "${ABI}" || true
+
 if [ -z "${NDK_ROOT}" ]; then
   echo "ANDROID_NDK 或 ANDROID_NDK_HOME 未设置，且未在常见路径找到 NDK" >&2
   echo "可通过 --ndk /path/to/ndk 指定，或导出 ANDROID_NDK 环境变量" >&2
@@ -37,12 +41,13 @@ TFLITE_ROOT="${SCRIPT_DIR}/third_party/tflite"
 INC_PATH="${TFLITE_ROOT}/include/tensorflow/lite/interpreter.h"
 LIB_A="${TFLITE_ROOT}/lib/${ABI}/libtensorflowlite.a"
 LIB_SO="${TFLITE_ROOT}/lib/${ABI}/libtensorflowlite.so"
-if [ ! -f "${INC_PATH}" ] || { [ ! -f "${LIB_A}" ] && [ ! -f "${LIB_SO}" ]; }; then
-  echo "缺少 TFLite 预编译库与头文件: ${TFLITE_ROOT}" >&2
-  echo "目录结构示例:"
-  echo "${TFLITE_ROOT}/include/tensorflow/lite/..."
-  echo "${TFLITE_ROOT}/lib/${ABI}/libtensorflowlite.a 或 libtensorflowlite.so"
-  exit 1
+if [ -z "${DISABLE_TFLITE:-}" ] || [ "${DISABLE_TFLITE}" != "ON" ]; then
+  if [ ! -f "${INC_PATH}" ]; then
+    echo "缺少 TFLite 头文件: ${INC_PATH}（如需启用 TFLite 源编译，请提供本地 TF 源）" >&2
+  fi
+  if [ ! -f "${LIB_A}" ] && [ ! -f "${LIB_SO}" ]; then
+    echo "缺少 TFLite 预编译库: ${LIB_A}/${LIB_SO}（已支持从 MavenCentral 自动拉取 AAR）" >&2
+  fi
 fi
 
 BUILD_DIR="${SCRIPT_DIR}/build/android/${ABI}"

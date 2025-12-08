@@ -23,7 +23,7 @@ extern "C" {
 
 // Use TfLiteNnapiDelegateOptionsDefault() for Default options.
 // WARNING: This is an experimental API and subject to change.
-typedef struct TfLiteNnapiDelegateOptions {
+struct TFL_CAPI_EXPORT TfLiteNnapiDelegateOptions {
   // Preferred Power/perf trade-off. For more details please see
   // ANeuralNetworksCompilation_setPreference documentation in :
   // https://developer.android.com/ndk/reference/group/neural-networks.html
@@ -32,8 +32,10 @@ typedef struct TfLiteNnapiDelegateOptions {
     kLowPower = 0,
     kFastSingleAnswer = 1,
     kSustainedSpeed = 2,
-  } execution_preference;  // Preferred Power/perf trade-off.
-                           // Default to kUndefined.
+  };
+
+  // Preferred Power/perf trade-off. Default to kUndefined.
+  ExecutionPreference execution_preference;
 
   // Selected NNAPI accelerator with nul-terminated name.
   // Default to nullptr, which implies the NNAPI default behavior: NNAPI
@@ -79,13 +81,13 @@ typedef struct TfLiteNnapiDelegateOptions {
   // If specified, NNAPI delegate will use the support lib instead of NNAPI in
   // Android OS.
   void* nnapi_support_library_handle;
-} TfLiteNnapiDelegateOptions;
+};
 
 // Returns a delegate that uses NNAPI for ops execution.
 // Must outlive the interpreter.
 // WARNING: This is an experimental API and subject to change.
-TFL_CAPI_EXPORT TfLiteDelegate* TfLiteNnapiDelegateCreate(
-    const TfLiteNnapiDelegateOptions* options);
+TfLiteDelegate* TFL_CAPI_EXPORT
+TfLiteNnapiDelegateCreate(const TfLiteNnapiDelegateOptions* options);
 
 // Returns TfLiteNnapiDelegateOptions populated with default values.
 // WARNING: This is an experimental API and subject to change.
@@ -93,7 +95,7 @@ TFL_CAPI_EXPORT TfLiteNnapiDelegateOptions TfLiteNnapiDelegateOptionsDefault();
 
 // Does any needed cleanup and deletes 'delegate'.
 // WARNING: This is an experimental API and subject to change.
-TFL_CAPI_EXPORT void TfLiteNnapiDelegateDelete(TfLiteDelegate* delegate);
+void TFL_CAPI_EXPORT TfLiteNnapiDelegateDelete(TfLiteDelegate* delegate);
 
 #ifdef __cplusplus
 }
