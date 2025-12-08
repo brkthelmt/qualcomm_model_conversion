@@ -1,23 +1,31 @@
 #include "tensor_ops.h"
+#ifndef DISABLE_TFLITE
 #include <tensorflow/lite/interpreter.h>
 #include <tensorflow/lite/model.h>
 #include <tensorflow/lite/kernels/register.h>
 #include <tensorflow/lite/c/c_api_types.h>
+#endif
 #include <fstream>
 #include <filesystem>
 
+#ifndef DISABLE_TFLITE
 static std::vector<int> TensorDims(TfLiteTensor* t) {
   std::vector<int> dims;
   for(int i = 0; i < t->dims->size; ++i) dims.push_back(t->dims->data[i]);
   return dims;
 }
+#endif
 
 std::vector<int> GetInputShapeNHWCOrNCHW(void* interpreter_void) {
+#ifndef DISABLE_TFLITE
   auto* interpreter = reinterpret_cast<tflite::Interpreter*>(interpreter_void);
   int idx = interpreter->inputs()[0];
   TfLiteTensor* t = interpreter->tensor(idx);
   auto dims = TensorDims(t);
   return dims;
+#else
+  return {};
+#endif
 }
 
 static void ToNHWC(const ImageRGB& img, float* dst, int h, int w) {
@@ -55,6 +63,7 @@ static void ToNCHW(const ImageRGB& img, float* dst, int h, int w) {
 }
 
 void FillInputTensor(void* interpreter_void, const ImageRGB& img, bool nhwc) {
+#ifndef DISABLE_TFLITE
   auto* interpreter = reinterpret_cast<tflite::Interpreter*>(interpreter_void);
   int idx = interpreter->inputs()[0];
   TfLiteTensor* t = interpreter->tensor(idx);
@@ -100,9 +109,13 @@ void FillInputTensor(void* interpreter_void, const ImageRGB& img, bool nhwc) {
       }
     }
   }
+#else
+  (void)interpreter_void; (void)img; (void)nhwc;
+#endif
 }
 
 void DumpOutputs(void* interpreter_void, const std::string& out_dir) {
+#ifndef DISABLE_TFLITE
   auto* interpreter = reinterpret_cast<tflite::Interpreter*>(interpreter_void);
   std::filesystem::create_directories(out_dir);
   auto outs = interpreter->outputs();
@@ -124,5 +137,7 @@ void DumpOutputs(void* interpreter_void, const std::string& out_dir) {
       }
     }
   }
+#else
+  (void)interpreter_void; (void)out_dir;
+#endif
 }
-

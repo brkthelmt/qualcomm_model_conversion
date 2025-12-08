@@ -5,6 +5,10 @@ MODEL_HOST_PATH="android_deploy/models/model.onnx"
 IMAGE_HOST_PATH=""
 ABI="arm64-v8a"
 DELEGATE="nnapi"
+if [ -n "${RUN_LOG_PATH:-}" ]; then
+  mkdir -p "$(dirname "${RUN_LOG_PATH}")"
+  exec > >(tee "${RUN_LOG_PATH}") 2>&1
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -16,10 +20,8 @@ while [[ $# -gt 0 ]]; do
       ABI="$2"; shift 2 ;;
     --delegate)
       DELEGATE="$2"; shift 2 ;;
-    --qnn-context-host-path)
-      QNN_CONTEXT_HOST_PATH="$2"; shift 2 ;;
-    --qnn-lib-dir-host)
-      QNN_LIB_DIR_HOST="$2"; shift 2 ;;
+    --stdout-host-path)
+      STDOUT_HOST_PATH="$2"; shift 2 ;;
     --labels-host-path)
       LABELS_HOST_PATH="$2"; shift 2 ;;
     *)
@@ -53,14 +55,7 @@ if [[ "${MODEL_EXT}" == "onnx" ]]; then
 fi
 adb push "${MODEL_HOST_PATH}" "${TMP_DIR}/${MODEL_DEVICE_NAME}"
 
-if [ -n "${QNN_CONTEXT_HOST_PATH:-}" ]; then
-  adb push "${QNN_CONTEXT_HOST_PATH}" "${TMP_DIR}/qnn_context.bin"
-fi
 
-if [ -n "${QNN_LIB_DIR_HOST:-}" ] && [ -d "${QNN_LIB_DIR_HOST}" ]; then
-  for so in $(ls "${QNN_LIB_DIR_HOST}"/*.so 2>/dev/null); do adb push "$so" "${TMP_DIR}/"; done
-  LD_PATH_CMD="LD_LIBRARY_PATH=${TMP_DIR}"
-fi
 
 IMG_EXT="${IMAGE_HOST_PATH##*.}"
 HOST_BMP="android_deploy/.tmp_input.bmp"
@@ -75,13 +70,12 @@ adb push "${HOST_BMP}" "${TMP_DIR}/image.bmp"
 
 DELEGATE_SO="android_deploy/third_party/tflite/lib/${ABI}/libtensorflowlite_nnapi_delegate.so"
 TFLITE_SO="android_deploy/third_party/tflite/lib/${ABI}/libtensorflowlite.so"
-TFLITE_C_SO="android_deploy/third_party/tflite/lib/${ABI}/libtensorflowlite_c.so"
+TFLITE_JNI_SO="android_deploy/third_party/tflite/lib/${ABI}/libtensorflowlite_jni.so"
 
 # ONNX Runtime libs (optional)
 ONNX_SO="android_deploy/third_party/onnxruntime/lib/${ABI}/libonnxruntime.so"
 ONNX_PROVIDERS_SHARED_SO="android_deploy/third_party/onnxruntime/lib/${ABI}/libonnxruntime_providers_shared.so"
 ONNX_NNAPI_SO="android_deploy/third_party/onnxruntime/lib/${ABI}/libonnxruntime_providers_nnapi.so"
-ONNX_QNN_SO="android_deploy/third_party/onnxruntime/lib/${ABI}/libonnxruntime_providers_qnn.so"
 adb shell "chmod +x ${TMP_DIR}/yolo_runner"
 LD_PATH_CMD=""
 if [ -f "${TFLITE_SO}" ]; then
@@ -92,8 +86,8 @@ if [ -f "${DELEGATE_SO}" ]; then
   adb push "${DELEGATE_SO}" "${TMP_DIR}/"
   LD_PATH_CMD="LD_LIBRARY_PATH=${TMP_DIR}"
 fi
-if [ -f "${TFLITE_C_SO}" ]; then
-  adb push "${TFLITE_C_SO}" "${TMP_DIR}/"
+if [ -f "${TFLITE_JNI_SO}" ]; then
+  adb push "${TFLITE_JNI_SO}" "${TMP_DIR}/"
   LD_PATH_CMD="LD_LIBRARY_PATH=${TMP_DIR}"
 fi
 
@@ -109,47 +103,35 @@ if [ -f "${ONNX_NNAPI_SO}" ]; then
   adb push "${ONNX_NNAPI_SO}" "${TMP_DIR}/"
   LD_PATH_CMD="LD_LIBRARY_PATH=${TMP_DIR}"
 fi
-if [ -f "${ONNX_QNN_SO}" ]; then
-  adb push "${ONNX_QNN_SO}" "${TMP_DIR}/"
-  LD_PATH_CMD="LD_LIBRARY_PATH=${TMP_DIR}"
-fi
 if [ -n "${LABELS_HOST_PATH:-}" ]; then
   adb push "${LABELS_HOST_PATH}" "${TMP_DIR}/labels.txt"
 fi
 if [ -n "${LD_PATH_CMD}" ]; then
   if [ -n "${LABELS_HOST_PATH:-}" ]; then
-    if [ -n "${QNN_CONTEXT_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt --qnn-context qnn_context.bin"
-    else
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt"
-    fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then mkdir -p "$(dirname "${STDOUT_HOST_PATH}")"; fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell logcat -c >/dev/null 2>&1 || true; adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; adb shell logcat -d | grep -E "TfLite|NNAPI|Nnapi|yolo_runner" | tee -a "${STDOUT_HOST_PATH}" || true; else adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt"; fi
   else
-    if [ -n "${QNN_CONTEXT_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --qnn-context qnn_context.bin"
-    else
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE}"
-    fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then mkdir -p "$(dirname "${STDOUT_HOST_PATH}")"; fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell logcat -c >/dev/null 2>&1 || true; adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; adb shell logcat -d | grep -E "TfLite|NNAPI|Nnapi|yolo_runner" | tee -a "${STDOUT_HOST_PATH}" || true; else adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE}"; fi
   fi
 else
   if [ -n "${LABELS_HOST_PATH:-}" ]; then
-    if [ -n "${QNN_CONTEXT_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt --qnn-context qnn_context.bin"
-    else
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt"
-    fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then mkdir -p "$(dirname "${STDOUT_HOST_PATH}")"; fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell logcat -c >/dev/null 2>&1 || true; adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; adb shell logcat -d | grep -E "TfLite|NNAPI|Nnapi|yolo_runner" | tee -a "${STDOUT_HOST_PATH}" || true; else adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --labels labels.txt"; fi
   else
-    if [ -n "${QNN_CONTEXT_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} --qnn-context qnn_context.bin"
-    else
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE}"
-    fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then mkdir -p "$(dirname "${STDOUT_HOST_PATH}")"; fi
+    if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell logcat -c >/dev/null 2>&1 || true; adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE} > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; adb shell logcat -d | grep -E "TfLite|NNAPI|Nnapi|yolo_runner" | tee -a "${STDOUT_HOST_PATH}" || true; else adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --delegate ${DELEGATE}"; fi
   fi
 fi
 
 LOCAL_OUT_DIR="android_deploy/output_pull"
-rm -rf "${LOCAL_OUT_DIR}"
 mkdir -p "${LOCAL_OUT_DIR}"
   adb pull "${TMP_DIR}/output" "${LOCAL_OUT_DIR}"
+
+PROFILE_REMOTE=$(adb shell "ls ${TMP_DIR}/ort_profile_*.json" 2>/dev/null || true)
+if [ -n "${PROFILE_REMOTE}" ]; then
+  for f in ${PROFILE_REMOTE}; do adb pull "$f" "${LOCAL_OUT_DIR}/" || true; done
+fi
 
 echo "结果已回拉到 ${LOCAL_OUT_DIR}"
 
@@ -166,15 +148,15 @@ if [ -f "${LOCAL_OUT_DIR}/output/boxes.txt" ]; then
   fi
   if [ -n "${LD_PATH_CMD}" ]; then
     if [ -n "${LABELS_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt"
+      if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; else adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt"; fi
     else
-      adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt"
+      if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; else adb shell "cd ${TMP_DIR} && ${LD_PATH_CMD} ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt"; fi
     fi
   else
     if [ -n "${LABELS_HOST_PATH:-}" ]; then
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt"
+      if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; else adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt --labels labels.txt"; fi
     else
-      adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt"
+      if [ -n "${STDOUT_HOST_PATH:-}" ]; then adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt > run_stdout.txt 2>&1"; adb shell "cat ${TMP_DIR}/run_stdout.txt" | tee "${STDOUT_HOST_PATH}"; else adb shell "cd ${TMP_DIR} && ./yolo_runner --model ${MODEL_DEVICE_NAME} --image image.bmp --output output --overlay-only true --boxes boxes.txt"; fi
     fi
   fi
   adb pull "${TMP_DIR}/output/annotated.bmp" "${LOCAL_OUT_DIR}/output/annotated.bmp" || true
