@@ -91,6 +91,19 @@ fetch_onnxruntime() {
     fi
     rm -rf "${dst}/_tmp_hdr" "${tmp_tgz}"
   fi
+  # 额外确保 NNAPI 工厂头存在（用于 OrtSessionOptionsAppendExecutionProvider_Nnapi）
+  if [ ! -f "${incdir}/nnapi_provider_factory.h" ]; then
+    nnapi_hdr_url="https://raw.githubusercontent.com/microsoft/onnxruntime/main/include/onnxruntime/core/providers/nnapi/nnapi_provider_factory.h"
+    tmp_hdr="$(mktemp).h"
+    echo "拉取 NNAPI provider factory 头 ${nnapi_hdr_url}"
+    dl "$(proxify "${nnapi_hdr_url}")" "${tmp_hdr}" || true
+    if [ ! -s "${tmp_hdr}" ]; then
+      rm -f "${tmp_hdr}"; tmp_hdr="$(mktemp).h";
+      alt_hdr="https://mirror.ghproxy.com/${nnapi_hdr_url}"
+      dl "${alt_hdr}" "${tmp_hdr}" || true
+    fi
+    if [ -s "${tmp_hdr}" ]; then mv "${tmp_hdr}" "${incdir}/nnapi_provider_factory.h"; else rm -f "${tmp_hdr}"; fi
+  fi
 }
 
 

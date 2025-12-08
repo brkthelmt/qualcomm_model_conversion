@@ -1,6 +1,7 @@
 #include "onnx_runner.h"
 #include <onnxruntime_cxx_api.h>
 #include <onnxruntime_c_api.h>
+#include <nnapi_provider_factory.h>
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -73,8 +74,8 @@ static uint16_t float_to_half(float v){
 static void enable_provider(Ort::SessionOptions& so, const std::string& provider){
   if(provider=="nnapi"){
     try {
-      std::unordered_map<std::string,std::string> opts;
-      so.AppendExecutionProvider("NNAPI", opts);
+      uint32_t flags = 0;
+      OrtSessionOptionsAppendExecutionProvider_Nnapi(so, flags);
     } catch(...) {
     }
   }
@@ -92,7 +93,6 @@ int RunONNX(const std::string& model_path,
   so.SetLogSeverityLevel(0);
   so.EnableProfiling("ort_profile");
   so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-  so.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
   enable_provider(so, provider);
 
   Ort::Session session(env, model_path.c_str(), so);

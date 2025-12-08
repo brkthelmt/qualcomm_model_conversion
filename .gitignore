@@ -7,10 +7,13 @@ output_pull/
 # Temporary files
 .tmp/
 .tmp_input.bmp
+/_tmp_hdr/
+/_tmp_fb/
 
 # Runtime profiles and logs
 ort_profile_*.json
 device_logs.txt
+logs/
 
 # Generated artifacts
 output/
@@ -19,8 +22,10 @@ output/
 *.quant.txt
 annotated.bmp
 
-# QAIRT/QNN runtime libs and vendor drops
-qa_libs/
+# Auto-fetched third_party artifacts (libraries and unpacked headers)
+third_party/onnxruntime/lib/
+third_party/tflite/lib/
+third_party/tflite/include/headers/
 
 # Archives
 *.zip
@@ -30,7 +35,7 @@ qa_libs/
 *.rar
 *.7z
 
-# Ensure third_party is tracked fully (override above ignores)
-!third_party/**
+# Models and large binaries
 *.dlc
 *.onnx
+*.tflite
