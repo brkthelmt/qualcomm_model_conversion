@@ -253,3 +253,7 @@ fi
 
 python "$EXPORT_PATH" "${FORWARD_ARGS[@]}"
 deactivate
+PATCHES_DIR="$CWD/scripts/patches"
+if [[ -d "$PATCHES_DIR" ]]; then
+  export PYTHONPATH="$PATCHES_DIR:${PYTHONPATH:-}"
+fi
