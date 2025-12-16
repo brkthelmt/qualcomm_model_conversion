@@ -22,10 +22,8 @@ output/
 *.quant.txt
 annotated.bmp
 
-# Auto-fetched third_party artifacts (libraries and unpacked headers)
-third_party/onnxruntime/lib/
-third_party/tflite/lib/
-third_party/tflite/include/headers/
+# third_party 整体不跟踪，由脚本在本地拉取/生成
+/third_party/
 
 # Archives
 *.zip

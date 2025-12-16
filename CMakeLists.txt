@@ -7,7 +7,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(TFLITE_ROOT "${CMAKE_SOURCE_DIR}/third_party/tflite")
 set(TFLITE_INCLUDE_DIR "${TFLITE_ROOT}/include")
-set(TF_SRC "${CMAKE_SOURCE_DIR}/../tensorflow/tensorflow")
 
 # ONNX Runtime
 set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
@@ -74,49 +73,23 @@ set(YOLO_RUNNER_SRC
   src/onnx_runner.cpp
 )
 
-set(TFLITE_CORE_SRC
-  ${TF_SRC}/lite/core/c/c_api.cc
-  ${TF_SRC}/lite/core/c/c_api_experimental.cc
-  ${TF_SRC}/lite/core/c/c_api_opaque.cc
-  ${TF_SRC}/lite/core/c/common.cc
-  ${TF_SRC}/lite/core/create_op_resolver_with_builtin_ops.cc
-  ${TF_SRC}/lite/delegates/interpreter_utils.cc
-  ${TF_SRC}/lite/delegates/nnapi/nnapi_delegate_c_api.cc
-  ${TF_SRC}/lite/delegates/nnapi/nnapi_delegate_disabled.cc
-)
+add_executable(yolo_runner ${YOLO_RUNNER_SRC})
 
-# 当 TFLite 头文件不可用时，禁用 TFLite 编译（仅构建 ONNX 路径）
-if(TFLITE_LIB)
-  add_executable(yolo_runner ${YOLO_RUNNER_SRC})
-elseif(NOT DISABLE_TFLITE)
-  add_executable(yolo_runner ${YOLO_RUNNER_SRC} ${TFLITE_CORE_SRC})
-else()
-  add_compile_definitions(DISABLE_TFLITE)
-  add_executable(yolo_runner ${YOLO_RUNNER_SRC})
+target_include_directories(yolo_runner PRIVATE "${CMAKE_SOURCE_DIR}/src")
+if(EXISTS "${TFLITE_INCLUDE_DIR}")
+  target_include_directories(yolo_runner PRIVATE "${TFLITE_INCLUDE_DIR}")
 endif()
-
-target_include_directories(yolo_runner PRIVATE
-  "${CMAKE_SOURCE_DIR}/../tensorflow"
-  "${CMAKE_SOURCE_DIR}/third_party/eigen3"
-  "${CMAKE_SOURCE_DIR}/third_party/tflite/include"
-  "${CMAKE_SOURCE_DIR}/src"
-)
 
 target_include_directories(yolo_runner PRIVATE "${ONNXRUNTIME_INCLUDE_DIR}")
 
-if(APPLE)
-  if(EXISTS "/opt/homebrew/include/flatbuffers")
-    include_directories("/opt/homebrew/include")
-  elseif(EXISTS "/usr/local/include/flatbuffers")
-    include_directories("/usr/local/include")
-  endif()
-  if(EXISTS "/opt/homebrew/include/eigen3")
-    include_directories("/opt/homebrew/include/eigen3")
-  endif()
-endif()
-
 if(EXISTS "${TFLITE_LIB}")
   target_link_libraries(yolo_runner ${TFLITE_LIB})
+endif()
+if(EXISTS "${TFLITE_C_LIB}")
+  target_link_libraries(yolo_runner ${TFLITE_C_LIB})
+endif()
+if(NOT TFLITE_LIB AND NOT TFLITE_C_LIB)
+  add_compile_definitions(DISABLE_TFLITE)
 endif()
 if(ONNXRUNTIME_LIB)
   target_link_libraries(yolo_runner ${ONNXRUNTIME_LIB})
