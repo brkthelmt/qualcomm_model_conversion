@@ -19,6 +19,17 @@ done
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 dl() { if have_cmd curl; then curl -L "$1" -o "$2"; elif have_cmd wget; then wget "$1" -O "$2"; else echo "缺少 curl/wget" >&2; return 1; fi }
 
+# 版本戳记工具：在目标目录写入/读取 .stamp 以避免重复下载
+write_stamp() {
+  local dir="$1"; local key="$2"; local val="$3"
+  mkdir -p "${dir}"
+  echo "${val}" > "${dir}/.${key}.stamp"
+}
+read_stamp() {
+  local dir="$1"; local key="$2"
+  if [ -f "${dir}/.${key}.stamp" ]; then cat "${dir}/.${key}.stamp"; else echo ""; fi
+}
+
 # GitHub 加速代理
 proxify() {
   local url="$1"
@@ -66,7 +77,8 @@ fetch_onnxruntime() {
   if [ -f "${incdir}/onnxruntime_cxx_api.h" ] && [ -f "${incdir}/onnxruntime_float16.h" ] && [ -f "${incdir}/onnxruntime_ep_c_api.h" ]; then
     have_all_hdr=1
   fi
-  if [ "${force_headers}" = "1" ] || [ "${have_all_hdr}" -eq 0 ]; then
+  local hdr_stamp="$(read_stamp "${incdir}" "onnxruntime_headers")"
+  if [ "${force_headers}" = "1" ] || [ "${have_all_hdr}" -eq 0 ] || [ "${hdr_stamp}" != "${ver}" ]; then
     echo "拉取 ONNX Runtime 头文件 ${tgz_url}"
     tmp_tgz="$(mktemp).tgz"
     dl "$(proxify "${tgz_url}")" "${tmp_tgz}" || true
@@ -90,6 +102,7 @@ fetch_onnxruntime() {
       find "${dst}/_tmp_hdr" -type f -path '*/include/*' -name '*.h' -exec cp {} "${incdir}/" \; || true
     fi
     rm -rf "${dst}/_tmp_hdr" "${tmp_tgz}"
+    write_stamp "${incdir}" "onnxruntime_headers" "${ver}"
   fi
   # 额外确保 NNAPI 工厂头存在（用于 OrtSessionOptionsAppendExecutionProvider_Nnapi）
   if [ ! -f "${incdir}/nnapi_provider_factory.h" ]; then
@@ -116,19 +129,14 @@ fetch_tflite() {
   local ver="${TFLITE_VER:-2.13.0}"
   local aar_url_default="https://repo1.maven.org/maven2/org/tensorflow/tensorflow-lite/${ver}/tensorflow-lite-${ver}.aar"
   local aar_url="${TFLITE_AAR_URL:-${aar_url_default}}"
-  if [ ! -f "${libdir}/libtensorflowlite.so" ] && [ ! -f "${libdir}/libtensorflowlite.a" ]; then
+  local want_libs="${WANT_TFLITE_LIBS:-0}"
+  if [ "${want_libs}" = "1" ] && [ ! -f "${libdir}/libtensorflowlite.so" ] && [ ! -f "${libdir}/libtensorflowlite.a" ] && [ ! -f "${libdir}/libtensorflowlite_jni.so" ]; then
     echo "拉取 TFLite AAR ${aar_url}"
     tmp_aar="$(mktemp).aar"
     dl "${aar_url}" "${tmp_aar}" || true
     unzip -oj "${tmp_aar}" "jni/${ABI}/libtensorflowlite.so" -d "${libdir}" || true
     unzip -oj "${tmp_aar}" "jni/${ABI}/libtensorflowlite_jni.so" -d "${libdir}" || true
     unzip -oj "${tmp_aar}" "jni/${ABI}/libtensorflowlite_nnapi_delegate.so" -d "${libdir}" || true
-    mkdir -p "${incdir}/tensorflow"
-    unzip -o "${tmp_aar}" "headers/tensorflow/*" -d "${incdir}" || true
-    if [ -d "${incdir}/headers/tensorflow" ]; then
-      rsync -a "${incdir}/headers/tensorflow/" "${incdir}/tensorflow/" || cp -R "${incdir}/headers/tensorflow/"* "${incdir}/tensorflow/" || true
-      rm -rf "${incdir}/headers"
-    fi
     rm -f "${tmp_aar}"
   fi
   # 补齐 c_api.h 依赖的 async/types 头文件（AAR 未提供）
@@ -158,73 +166,78 @@ EOF
   fi
   # 额外拉取 C++ API 头文件（interpreter.h、model.h、kernels/register.h 等）
   # 来自 TensorFlow 源码标签 v${ver}
-  local tf_zip_url="https://github.com/tensorflow/tensorflow/archive/refs/tags/v${ver}.zip"
-  local tmp_zip="$(mktemp).zip"
-  echo "拉取 TensorFlow 源码头 ${tf_zip_url}"
-  dl "$(proxify "${tf_zip_url}")" "${tmp_zip}" || true
-  if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
-    rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
-    local alt_url="${tf_zip_url/https:\/\/github.com/https:\/\/ghfast.top\/github.com}"
-    dl "${alt_url}" "${tmp_zip}" || true
+  local tf_stamp="$(read_stamp "${incdir}/tensorflow/lite" "tflite_headers")"
+  local need_tf_headers=0
+  if [ ! -f "${incdir}/tensorflow/lite/interpreter.h" ] || [ ! -f "${incdir}/tensorflow/lite/core/interpreter.h" ] || [ "${tf_stamp}" != "${ver}" ]; then
+    need_tf_headers=1
   fi
-  if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
-    rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
-    local alt_url2="https://mirror.ghproxy.com/${tf_zip_url}"
-    dl "${alt_url2}" "${tmp_zip}" || true
-  fi
-  mkdir -p "${TP_DIR}/_tmp_tf"
-  unzip -q "${tmp_zip}" -d "${TP_DIR}/_tmp_tf" || true
-  local tf_root
-  tf_root="$(find "${TP_DIR}/_tmp_tf" -maxdepth 1 -type d -name 'tensorflow-*' | head -n 1 || true)"
-  if [ -n "${tf_root}" ] && [ -d "${tf_root}/tensorflow/lite" ]; then
-    mkdir -p "${incdir}/tensorflow/lite" "${incdir}/tensorflow/lite/kernels" "${incdir}/tensorflow/lite/core/api" "${incdir}/tensorflow/lite/core"
-    for f in interpreter.h model.h signature_runner.h allocation.h error_reporter.h op_resolver.h; do
-      if [ -f "${tf_root}/tensorflow/lite/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/${f}" "${incdir}/tensorflow/lite/${f}"; fi
-      if [ -f "${tf_root}/tensorflow/lite/core/api/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/core/api/${f}" "${incdir}/tensorflow/lite/core/api/${f}"; fi
-    done
-    if [ -f "${tf_root}/tensorflow/lite/kernels/register.h" ]; then cp -f "${tf_root}/tensorflow/lite/kernels/register.h" "${incdir}/tensorflow/lite/kernels/register.h"; fi
-    # 兼容包含的其它常用头
-    for f in model_builder.h model_building.h namespace.h optional_debug_tools.h context.h; do
-      if [ -f "${tf_root}/tensorflow/lite/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/${f}" "${incdir}/tensorflow/lite/${f}"; fi
-    done
-    # 拷贝 core 目录下的所有 .h 头文件（包含 core/interpreter.h 等）
-    find "${tf_root}/tensorflow/lite/core" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
-      rel="${hf#${tf_root}/tensorflow/lite/core/}"
-      mkdir -p "${incdir}/tensorflow/lite/core/$(dirname "${rel}")"
-      cp -f "${hf}" "${incdir}/tensorflow/lite/core/${rel}"
-    done
-    # 拷贝 lite/c 目录下的所有 .h（包含 common_internal.h 等）
-    if [ -d "${tf_root}/tensorflow/lite/c" ]; then
-      mkdir -p "${incdir}/tensorflow/lite/c"
-      find "${tf_root}/tensorflow/lite/c" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
-        cp -f "${hf}" "${incdir}/tensorflow/lite/c/$(basename "${hf}")"
+  if [ "${need_tf_headers}" -eq 1 ]; then
+    local tf_zip_url="https://github.com/tensorflow/tensorflow/archive/refs/tags/v${ver}.zip"
+    local tmp_zip="$(mktemp).zip"
+    echo "拉取 TensorFlow 源码头 ${tf_zip_url}"
+    dl "$(proxify "${tf_zip_url}")" "${tmp_zip}" || true
+    if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
+      rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
+      local alt_url="${tf_zip_url/https:\/\/github.com/https:\/\/ghfast.top\/github.com}"
+      dl "${alt_url}" "${tmp_zip}" || true
+    fi
+    if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
+      rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
+      local alt_url2="https://mirror.ghproxy.com/${tf_zip_url}"
+      dl "${alt_url2}" "${tmp_zip}" || true
+    fi
+    mkdir -p "${TP_DIR}/_tmp_tf"
+    unzip -q "${tmp_zip}" -d "${TP_DIR}/_tmp_tf" || true
+    local tf_root
+    tf_root="$(find "${TP_DIR}/_tmp_tf" -maxdepth 1 -type d -name 'tensorflow-*' | head -n 1 || true)"
+    if [ -n "${tf_root}" ] && [ -d "${tf_root}/tensorflow/lite" ]; then
+      mkdir -p "${incdir}/tensorflow/lite" "${incdir}/tensorflow/lite/kernels" "${incdir}/tensorflow/lite/core/api" "${incdir}/tensorflow/lite/core"
+      for f in interpreter.h model.h signature_runner.h allocation.h error_reporter.h op_resolver.h; do
+        if [ -f "${tf_root}/tensorflow/lite/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/${f}" "${incdir}/tensorflow/lite/${f}"; fi
+        if [ -f "${tf_root}/tensorflow/lite/core/api/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/core/api/${f}" "${incdir}/tensorflow/lite/core/api/${f}"; fi
+      done
+      if [ -f "${tf_root}/tensorflow/lite/kernels/register.h" ]; then cp -f "${tf_root}/tensorflow/lite/kernels/register.h" "${incdir}/tensorflow/lite/kernels/register.h"; fi
+      for f in model_builder.h model_building.h namespace.h optional_debug_tools.h context.h; do
+        if [ -f "${tf_root}/tensorflow/lite/${f}" ]; then cp -f "${tf_root}/tensorflow/lite/${f}" "${incdir}/tensorflow/lite/${f}"; fi
+      done
+      find "${tf_root}/tensorflow/lite/core" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
+        rel="${hf#${tf_root}/tensorflow/lite/core/}"
+        mkdir -p "${incdir}/tensorflow/lite/core/$(dirname "${rel}")"
+        cp -f "${hf}" "${incdir}/tensorflow/lite/core/${rel}"
+      done
+      if [ -d "${tf_root}/tensorflow/lite/c" ]; then
+        mkdir -p "${incdir}/tensorflow/lite/c"
+        find "${tf_root}/tensorflow/lite/c" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
+          cp -f "${hf}" "${incdir}/tensorflow/lite/c/$(basename "${hf}")"
+        done
+      fi
+      if [ -d "${tf_root}/tensorflow/lite/experimental" ]; then
+        find "${tf_root}/tensorflow/lite/experimental" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
+          rel="${hf#${tf_root}/tensorflow/lite/experimental/}"
+          mkdir -p "${incdir}/tensorflow/lite/experimental/$(dirname "${rel}")"
+          cp -f "${hf}" "${incdir}/tensorflow/lite/experimental/${rel}"
+        done
+      fi
+      find "${tf_root}/tensorflow/lite" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
+        rel="${hf#${tf_root}/tensorflow/lite/}"
+        mkdir -p "${incdir}/tensorflow/lite/$(dirname "${rel}")"
+        cp -f "${hf}" "${incdir}/tensorflow/lite/${rel}"
       done
     fi
-    # 拷贝 experimental 目录头文件
-    if [ -d "${tf_root}/tensorflow/lite/experimental" ]; then
-      find "${tf_root}/tensorflow/lite/experimental" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
-        rel="${hf#${tf_root}/tensorflow/lite/experimental/}"
-        mkdir -p "${incdir}/tensorflow/lite/experimental/$(dirname "${rel}")"
-        cp -f "${hf}" "${incdir}/tensorflow/lite/experimental/${rel}"
-      done
-    fi
-    # 兜底：拷贝 tensorflow/lite 下所有 .h 到 include（保持相对结构）
-    find "${tf_root}/tensorflow/lite" -type f -name '*.h' -print0 | while IFS= read -r -d '' hf; do
-      rel="${hf#${tf_root}/tensorflow/lite/}"
-      mkdir -p "${incdir}/tensorflow/lite/$(dirname "${rel}")"
-      cp -f "${hf}" "${incdir}/tensorflow/lite/${rel}"
-    done
+    rm -rf "${TP_DIR}/_tmp_tf" "${tmp_zip}"
+    write_stamp "${incdir}/tensorflow/lite" "tflite_headers" "${ver}"
   fi
-  rm -rf "${TP_DIR}/_tmp_tf" "${tmp_zip}"
   # 额外拉取 C API 动态库（libtensorflowlite_c.so），确保无需外部源码编译
-  local aar_c_url_default="https://repo1.maven.org/maven2/org/tensorflow/tensorflow-lite-c/${ver}/tensorflow-lite-c-${ver}.aar"
-  local aar_c_url="${TFLITE_C_AAR_URL:-${aar_c_url_default}}"
-  if [ ! -f "${libdir}/libtensorflowlite_c.so" ]; then
-    echo "拉取 TFLite C AAR ${aar_c_url}"
-    tmp_aar_c="$(mktemp).aar"
-    dl "${aar_c_url}" "${tmp_aar_c}" || true
-    unzip -oj "${tmp_aar_c}" "jni/${ABI}/libtensorflowlite_c.so" -d "${libdir}" || true
-    rm -f "${tmp_aar_c}"
+  if [ "${want_libs}" = "1" ]; then
+    local aar_c_url_default="https://repo1.maven.org/maven2/org/tensorflow/tensorflow-lite-c/${ver}/tensorflow-lite-c-${ver}.aar"
+    local aar_c_url="${TFLITE_C_AAR_URL:-${aar_c_url_default}}"
+    if [ ! -f "${libdir}/libtensorflowlite_c.so" ]; then
+      echo "拉取 TFLite C AAR ${aar_c_url}"
+      tmp_aar_c="$(mktemp).aar"
+      dl "${aar_c_url}" "${tmp_aar_c}" || true
+      unzip -oj "${tmp_aar_c}" "jni/${ABI}/libtensorflowlite_c.so" -d "${libdir}" || true
+      rm -f "${tmp_aar_c}"
+    fi
   fi
   # 不复制 TensorFlow 源头到 third_party；如需启用 TFLite 源编译，请在本地 TF 源中包含相关头
 }
@@ -236,28 +249,32 @@ fetch_flatbuffers_headers() {
   # 版本与 TFLite 2.13.0 兼容：FlatBuffers v23.x（默认 v23.5.26，可通过 FLATBUFFERS_VER 覆盖）
   local fb_ver="${FLATBUFFERS_VER:-23.1.21}"
   local fb_zip="https://github.com/google/flatbuffers/archive/refs/tags/v${fb_ver}.zip"
-  local tmp_zip="$(mktemp).zip"
-  echo "拉取 FlatBuffers(${fb_ver}) 头文件 ${fb_zip}"
-  dl "$(proxify "${fb_zip}")" "${tmp_zip}" || true
-  if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
-    rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
-    local alt_url="${fb_zip/https:\/\/github.com/https:\/\/ghfast.top\/github.com}"
-    dl "${alt_url}" "${tmp_zip}" || true
+  local fb_stamp="$(read_stamp "${dst}" "flatbuffers_headers")"
+  if [ ! -f "${dst}/base.h" ] || [ "${fb_stamp}" != "${fb_ver}" ]; then
+    local tmp_zip="$(mktemp).zip"
+    echo "拉取 FlatBuffers(${fb_ver}) 头文件 ${fb_zip}"
+    dl "$(proxify "${fb_zip}")" "${tmp_zip}" || true
+    if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
+      rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
+      local alt_url="${fb_zip/https:\/\/github.com/https:\/\/ghfast.top\/github.com}"
+      dl "${alt_url}" "${tmp_zip}" || true
+    fi
+    if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
+      rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
+      local alt_url2="https://mirror.ghproxy.com/${fb_zip}"
+      dl "${alt_url2}" "${tmp_zip}" || true
+    fi
+    mkdir -p "${TP_DIR}/_tmp_fb"
+    unzip -q "${tmp_zip}" -d "${TP_DIR}/_tmp_fb" || true
+    local fb_root
+    fb_root="$(find "${TP_DIR}/_tmp_fb" -maxdepth 1 -type d -name 'flatbuffers-*' | head -n 1 || true)"
+    if [ -n "${fb_root}" ] && [ -d "${fb_root}/include/flatbuffers" ]; then
+      rm -rf "${dst}"/*
+      rsync -a "${fb_root}/include/flatbuffers/" "${dst}/" || cp -R "${fb_root}/include/flatbuffers/"* "${dst}/" || true
+    fi
+    rm -rf "${TP_DIR}/_tmp_fb" "${tmp_zip}"
+    write_stamp "${dst}" "flatbuffers_headers" "${fb_ver}"
   fi
-  if ! unzip -t "${tmp_zip}" >/dev/null 2>&1; then
-    rm -f "${tmp_zip}"; tmp_zip="$(mktemp).zip";
-    local alt_url2="https://mirror.ghproxy.com/${fb_zip}"
-    dl "${alt_url2}" "${tmp_zip}" || true
-  fi
-  mkdir -p "${TP_DIR}/_tmp_fb"
-  unzip -q "${tmp_zip}" -d "${TP_DIR}/_tmp_fb" || true
-  local fb_root
-  fb_root="$(find "${TP_DIR}/_tmp_fb" -maxdepth 1 -type d -name 'flatbuffers-*' | head -n 1 || true)"
-  if [ -n "${fb_root}" ] && [ -d "${fb_root}/include/flatbuffers" ]; then
-    rm -rf "${dst}"/*
-    rsync -a "${fb_root}/include/flatbuffers/" "${dst}/" || cp -R "${fb_root}/include/flatbuffers/"* "${dst}/" || true
-  fi
-  rm -rf "${TP_DIR}/_tmp_fb" "${tmp_zip}"
 }
 
 fetch_onnxruntime

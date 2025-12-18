@@ -1,4 +1,5 @@
 #include "onnx_runner.h"
+#ifdef HAVE_ORT
 #include <onnxruntime_cxx_api.h>
 #include <onnxruntime_c_api.h>
 #include <nnapi_provider_factory.h>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include "bmp_io.h"
 #include <set>
+#endif
 
 static void write_shape(const std::string& path, const std::vector<int64_t>& shape){
   std::ofstream os(path);
@@ -21,6 +23,7 @@ static void write_bin(const std::string& path, const void* data, size_t bytes){
   if(os && data){ os.write(reinterpret_cast<const char*>(data), bytes); }
 }
 
+#ifdef HAVE_ORT
 static std::vector<int64_t> get_input_shape(const Ort::Session& session, size_t index){
   Ort::AllocatorWithDefaultOptions alloc;
   auto info = session.GetInputTypeInfo(index);
@@ -34,6 +37,7 @@ static ONNXTensorElementDataType get_input_type(const Ort::Session& session, siz
   auto tensor_info = info.GetTensorTypeAndShapeInfo();
   return tensor_info.GetElementType();
 }
+#endif
 
 static bool is_nhwc_from_shape(const std::vector<int64_t>& shape){
   if(shape.size()==4){
@@ -87,6 +91,7 @@ int RunONNX(const std::string& model_path,
             const std::string& out_dir,
             const std::string& provider,
             int threads){
+#ifdef HAVE_ORT
   Ort::Env env(ORT_LOGGING_LEVEL_VERBOSE, "yolo_runner_onnx");
   Ort::SessionOptions so;
   if(threads>0) so.SetIntraOpNumThreads(threads);
@@ -238,6 +243,9 @@ int RunONNX(const std::string& model_path,
       write_bin(base + ".bin", p, elem_count * sizeof(int8_t));
     }
   }
-
   return 0;
+#else
+  (void)model_path; (void)image_path; (void)out_dir; (void)provider; (void)threads;
+  return -1;
+#endif
 }

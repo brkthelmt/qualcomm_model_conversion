@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
     // - CPU: 其它情况走 ORT 默认 CPU
     #ifdef HAVE_ORT
     if(model_path.size()>=5 && model_path.substr(model_path.size()-5)==".onnx"){
+      std::cout << "Info: Detected .onnx extension, switching to ONNX Runtime." << std::endl;
       int rc = RunONNX(model_path, image_path, out_dir, delegate, threads);
       if(rc!=0) throw std::runtime_error("onnx_run");
       std::cout << "done" << std::endl;
@@ -70,6 +71,7 @@ int main(int argc, char** argv) {
     
 
 #ifndef DISABLE_TFLITE
+    std::cout << "Info: Defaulting to TFLite Runtime." << std::endl;
     TfLiteModel* model = TfLiteModelCreateFromFile(model_path.c_str());
     if(!model) throw std::runtime_error("model");
     TfLiteInterpreterOptions* options = TfLiteInterpreterOptionsCreate();

@@ -64,7 +64,7 @@ if [ -n "${IMAGE_HOST_PATH}" ]; then
   IMG_EXT="${IMAGE_HOST_PATH##*.}"
   HOST_BMP="android_deploy/.tmp_input.bmp"
   rm -f "${HOST_BMP}"
-  if [[ "${IMG_EXT}" != "bmp" ]]; then                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          n
+  if [[ "${IMG_EXT}" != "bmp" ]]; then
     sips -s format bmp "${IMAGE_HOST_PATH}" --out "${HOST_BMP}" >/dev/null
   else
     cp "${IMAGE_HOST_PATH}" "${HOST_BMP}"

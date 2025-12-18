@@ -80,7 +80,9 @@ if(EXISTS "${TFLITE_INCLUDE_DIR}")
   target_include_directories(yolo_runner PRIVATE "${TFLITE_INCLUDE_DIR}")
 endif()
 
-target_include_directories(yolo_runner PRIVATE "${ONNXRUNTIME_INCLUDE_DIR}")
+if(EXISTS "${ONNXRUNTIME_INCLUDE_DIR}")
+  target_include_directories(yolo_runner PRIVATE "${ONNXRUNTIME_INCLUDE_DIR}")
+endif()
 
 if(EXISTS "${TFLITE_LIB}")
   target_link_libraries(yolo_runner ${TFLITE_LIB})
